@@ -1,0 +1,43 @@
+__pycache__/
+*.pyc
+
+.venv/
+venv/
+env/
+
+.idea/
+
+build/
+dist/
+*.spec
+
+_run_logs/
+output/
+outputs/
+results/
+
+.env
+*.log
+# Build
+build/
+dist/
+release/
+
+# Runtime
+logs/
+output/
+_run_logs/
+
+# Temporary
+project_snapshot.md
+# Test outputs
+**/output*/
+**/plots/
+
+# Package archives
+*.zip
+
+# Build outputs
+build/
+dist/
+release/
