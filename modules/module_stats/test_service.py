@@ -1,9 +1,15 @@
 from pathlib import Path
-from service import run_stats_analysis, get_table_columns
+import sys
 
 BASE_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = BASE_DIR.parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-input_file = BASE_DIR / "tests" / "demo_data.xlsx"
+from modules.module_stats.service import run_stats_analysis, get_table_columns
+from modules.module_stats.test_batch_analysis import ensure_demo_two_way_data
+
+input_file = ensure_demo_two_way_data()
 output_dir = BASE_DIR / "output"
 
 print("===== 表头 =====")
@@ -13,9 +19,9 @@ print("===== 开始分析 =====")
 result = run_stats_analysis(
     input_file=input_file,
     output_dir=output_dir,
-    factor1="A",
-    factor2="B",
-    value_col="value"
+    factor1="Group",
+    factor2="Time",
+    value_col="pH"
 )
 
 print(result["success"])

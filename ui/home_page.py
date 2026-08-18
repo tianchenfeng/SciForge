@@ -12,6 +12,7 @@ class HomePage(QWidget):
         self.on_open_gas_fit = None
         self.on_open_silage_eval = None
         self.on_open_rnaseq = None
+        self.on_open_metabolomics = None
         self.init_ui()
         self.apply_style()
 
@@ -41,6 +42,8 @@ class HomePage(QWidget):
         self.btn_silage_eval = QPushButton("青贮综合评价")
         self.btn_rnaseq = QPushButton("RNASeq 综合分析")
 
+        self.btn_metabolomics = QPushButton("代谢组综合分析")
+
         self.btn_16s.clicked.connect(self.handle_open_16s)
         self.btn_feed.clicked.connect(self.handle_open_feed)
         self.btn_stats.clicked.connect(self.handle_open_stats)
@@ -48,12 +51,16 @@ class HomePage(QWidget):
         self.btn_silage_eval.clicked.connect(self.handle_open_silage_eval)
         self.btn_rnaseq.clicked.connect(self.handle_open_rnaseq)
 
+        self.btn_metabolomics.clicked.connect(self.handle_open_metabolomics)
+
         btn_layout.addWidget(self.btn_16s)
         btn_layout.addWidget(self.btn_feed)
         btn_layout.addWidget(self.btn_stats)
         btn_layout.addWidget(self.btn_gas_fit)
         btn_layout.addWidget(self.btn_silage_eval)
         btn_layout.addWidget(self.btn_rnaseq)
+
+        btn_layout.addWidget(self.btn_metabolomics)
 
         layout.addStretch()
         layout.addLayout(btn_layout)
@@ -84,6 +91,10 @@ class HomePage(QWidget):
     def handle_open_rnaseq(self):
         if callable(self.on_open_rnaseq):
             self.on_open_rnaseq()
+
+    def handle_open_metabolomics(self):
+        if callable(self.on_open_metabolomics):
+            self.on_open_metabolomics()
 
     def apply_style(self):
         self.setStyleSheet("""

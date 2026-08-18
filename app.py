@@ -45,14 +45,32 @@ def run_embedded_script() -> bool:
         "--input_dir", args.input_dir or "",
         "--output_dir", args.output_dir or "",
         "--mode", args.mode or "two_factor",
-        "--app_base_dir", base_dir,
     ]
+    if os.path.basename(args.run_script) == "05_picrust2.py":
+        sys.argv.extend(["--app_base_dir", base_dir])
 
     runpy.run_path(script_path, run_name="__main__")
     return True
 
 
+def run_metabolomics() -> int | None:
+    """Run the process-isolated metabolomics pipeline without starting Qt."""
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--run-metabolomics", action="store_true")
+    parser.add_argument("--config", default=None)
+    args, _ = parser.parse_known_args()
+    if not args.run_metabolomics:
+        return None
+    if not args.config:
+        raise ValueError("--config is required with --run-metabolomics")
+    from modules.module_metabolomics.runner import main as metabolomics_main
+    return metabolomics_main(["--config", args.config])
+
+
 def main() -> int:
+    metabolomics_exit = run_metabolomics()
+    if metabolomics_exit is not None:
+        return metabolomics_exit
     if run_embedded_script():
         return 0
 

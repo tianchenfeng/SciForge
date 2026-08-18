@@ -111,7 +111,10 @@ def build_group_order_first_appearance(meta, factor1, factor2):
     """
     严格按 metadata 中组合首次出现顺序
     """
-    groups = meta[factor1].astype(str) + "_" + meta[factor2].astype(str)
+    if factor2 is None:
+        groups = meta[factor1].astype(str)
+    else:
+        groups = meta[factor1].astype(str) + "_" + meta[factor2].astype(str)
 
     ordered_groups = []
     seen = set()
@@ -169,21 +172,25 @@ def read_metadata_auto(meta_path):
 
     meta.columns = [clean_header_text(c) for c in meta.columns]
 
-    if meta.shape[1] < 3:
+    min_columns = 2 if ANALYSIS_MODE == "single_factor" else 3
+    if meta.shape[1] < min_columns:
+        expected = "样本名 + 一个因素" if ANALYSIS_MODE == "single_factor" else "样本名 + 两个因素"
         raise ValueError(
-            f"metadata 至少需要 3 列：样本名 + 两个因素。\n当前列名：{list(meta.columns)}"
+            f"metadata 至少需要 {min_columns} 列：{expected}。\n当前列名：{list(meta.columns)}"
         )
 
     sample_col = meta.columns[0]
     factor1 = clean_header_text(meta.columns[1])
-    factor2 = clean_header_text(meta.columns[2])
+    factor2 = None if ANALYSIS_MODE == "single_factor" else clean_header_text(meta.columns[2])
 
-    meta = meta[[sample_col, factor1, factor2]].copy()
+    factor_columns = [factor1] + ([factor2] if factor2 else [])
+    meta = meta[[sample_col] + factor_columns].copy()
     meta = meta.rename(columns={sample_col: "SampleID"})
 
     meta["SampleID"] = meta["SampleID"].astype(str).map(clean_text)
     meta[factor1] = meta[factor1].astype(str).map(clean_text)
-    meta[factor2] = meta[factor2].astype(str).map(clean_text)
+    if factor2:
+        meta[factor2] = meta[factor2].astype(str).map(clean_text)
 
     meta = meta.loc[~meta["SampleID"].duplicated(keep="first")].copy()
     meta = meta.set_index("SampleID")
@@ -247,7 +254,10 @@ def load_data_strict():
     safe_print(f"  -> Samples aligned: {len(valid_samples)}")
     safe_print(f"  -> Features aligned: {len(common_features)}")
     safe_print(f"  -> Row factor (第2列): {factor1}")
-    safe_print(f"  -> Col factor (第3列): {factor2}")
+    if factor2:
+        safe_print(f"  -> Col factor (第3列): {factor2}")
+    else:
+        safe_print("  -> Analysis mode: single factor")
 
     return meta, ft, tax, factor1, factor2
 
@@ -295,7 +305,10 @@ def aggregate_genus_relative_abundance(ft, tax):
 def build_group_mean_table(ft_genus, meta, factor1, factor2):
     safe_print("[Step 3] Building group mean abundance table ...")
 
-    group_col = meta[factor1].astype(str) + "_" + meta[factor2].astype(str)
+    if factor2 is None:
+        group_col = meta[factor1].astype(str)
+    else:
+        group_col = meta[factor1].astype(str) + "_" + meta[factor2].astype(str)
 
     df_trans = ft_genus.T.copy()
     df_trans["Group"] = group_col.values

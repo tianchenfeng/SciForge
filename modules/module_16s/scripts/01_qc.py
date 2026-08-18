@@ -115,21 +115,25 @@ def read_metadata_auto(meta_path):
 
     meta.columns = [clean_header_text(c) for c in meta.columns]
 
-    if meta.shape[1] < 3:
+    min_columns = 2 if ANALYSIS_MODE == "single_factor" else 3
+    if meta.shape[1] < min_columns:
+        expected = "样本名 + 一个因素" if ANALYSIS_MODE == "single_factor" else "样本名 + 两个因素"
         raise ValueError(
-            f"metadata 至少需要 3 列：样本名 + 两个因素。\n当前列名：{list(meta.columns)}"
+            f"metadata 至少需要 {min_columns} 列：{expected}。\n当前列名：{list(meta.columns)}"
         )
 
     sample_col = meta.columns[0]
     factor1 = clean_header_text(meta.columns[1])   # 本脚本用于分组颜色
-    factor2 = clean_header_text(meta.columns[2])   # 先读取备用，便于全流程统一
+    factor2 = None if ANALYSIS_MODE == "single_factor" else clean_header_text(meta.columns[2])
 
-    meta = meta[[sample_col, factor1, factor2]].copy()
+    selected_columns = [sample_col, factor1] + ([factor2] if factor2 else [])
+    meta = meta[selected_columns].copy()
     meta = meta.rename(columns={sample_col: "SampleID"})
 
     meta["SampleID"] = meta["SampleID"].astype(str).map(clean_text)
     meta[factor1] = meta[factor1].astype(str).map(clean_text)
-    meta[factor2] = meta[factor2].astype(str).map(clean_text)
+    if factor2:
+        meta[factor2] = meta[factor2].astype(str).map(clean_text)
 
     meta = meta.loc[~meta["SampleID"].duplicated(keep="first")].copy()
     meta = meta.set_index("SampleID")
@@ -171,7 +175,10 @@ def load_data_strict():
     safe_print(f"  -> Loaded {len(valid_samples)} samples.")
     safe_print(f"  -> Sample order check (top 5): {valid_samples[:5]}")
     safe_print(f"  -> Group factor (第2列): {factor1}")
-    safe_print(f"  -> Secondary factor (第3列): {factor2}")
+    if factor2:
+        safe_print(f"  -> Secondary factor (第3列): {factor2}")
+    else:
+        safe_print("  -> Analysis mode: single factor")
 
     return meta, ft, factor1, factor2
 

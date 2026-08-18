@@ -10,9 +10,10 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from common.io_utils import load_table_auto
 from modules.module_stats.stats_core import run_one_way_anova
+from modules.module_stats.test_batch_analysis import ensure_demo_one_way_data
 
 
-input_file = BASE_DIR / "tests" / "demo_data.xlsx"
+input_file = ensure_demo_one_way_data()
 
 df = load_table_auto(input_file)
 

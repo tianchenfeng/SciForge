@@ -36,6 +36,16 @@ def find_existing_file(candidates):
     return None
 
 
+def read_csv_with_encoding_fallback(path: str, **kwargs):
+    last_error = None
+    for encoding in ("utf-8-sig", "utf-8", "gb18030"):
+        try:
+            return pd.read_csv(path, encoding=encoding, **kwargs)
+        except UnicodeDecodeError as exc:
+            last_error = exc
+    raise ValueError(f"无法识别文件编码：{path}") from last_error
+
+
 def detect_sample_column(df: pd.DataFrame):
     for col in ["SampleID", "sample-id", "sample_id", "sample", "id"]:
         if col in df.columns:
@@ -50,7 +60,7 @@ def load_metadata(input_dir: str):
     ])
     if path is None:
         raise FileNotFoundError("找不到 metadata.tsv")
-    df = pd.read_csv(path, sep="\t")
+    df = read_csv_with_encoding_fallback(path, sep="\t")
     return df, path
 
 
@@ -61,7 +71,7 @@ def load_env_data(input_dir: str):
     ])
     if path is None:
         raise FileNotFoundError("找不到 data.csv（环境/发酵指标表）")
-    df = pd.read_csv(path)
+    df = read_csv_with_encoding_fallback(path)
     return df, path
 
 
@@ -72,7 +82,7 @@ def load_genus_table(output_dir: str):
     ])
     if path is None:
         raise FileNotFoundError("找不到 Sample_RelAbundance_Genus.tsv，请先运行 03_taxonomy.py")
-    df = pd.read_csv(path, sep="\t")
+    df = read_csv_with_encoding_fallback(path, sep="\t")
     return df, path
 
 

@@ -218,21 +218,25 @@ def read_metadata_auto(meta_path):
 
     meta.columns = [clean_header_text(c) for c in meta.columns]
 
-    if meta.shape[1] < 3:
+    min_columns = 2 if ANALYSIS_MODE == "single_factor" else 3
+    if meta.shape[1] < min_columns:
+        expected = "样本名 + 一个因素" if ANALYSIS_MODE == "single_factor" else "样本名 + 两个因素"
         raise ValueError(
-            f"metadata 至少需要 3 列：样本名 + 两个因素。\n当前列名：{list(meta.columns)}"
+            f"metadata 至少需要 {min_columns} 列：{expected}。\n当前列名：{list(meta.columns)}"
         )
 
     sample_col = meta.columns[0]
     factor1 = clean_header_text(meta.columns[1])   # 行因素
-    factor2 = clean_header_text(meta.columns[2])   # 列因素
+    factor2 = None if ANALYSIS_MODE == "single_factor" else clean_header_text(meta.columns[2])
 
-    meta = meta[[sample_col, factor1, factor2]].copy()
+    factor_columns = [factor1] + ([factor2] if factor2 else [])
+    meta = meta[[sample_col] + factor_columns].copy()
     meta = meta.rename(columns={sample_col: "SampleID"})
 
     meta["SampleID"] = meta["SampleID"].astype(str).map(clean_text)
     meta[factor1] = meta[factor1].astype(str).map(clean_text)
-    meta[factor2] = meta[factor2].astype(str).map(clean_text)
+    if factor2:
+        meta[factor2] = meta[factor2].astype(str).map(clean_text)
 
     meta = meta.loc[~meta["SampleID"].duplicated(keep="first")].copy()
     meta = meta.set_index("SampleID")
@@ -425,6 +429,87 @@ def estimate_sem(df_long, factor1, factor2, model):
     return np.nan, "NA"
 
 
+def export_one_factor_table(ft_rel, top_taxa, meta, factor1, level_name):
+    levels = order_row_factor(meta[factor1].tolist())
+    first_col_name = clean_header_text("菌门" if level_name == "Phylum" else "菌属")
+    final_rows = []
+    stats_rows = []
+
+    for taxon in top_taxa:
+        taxon = clean_text(taxon)
+        df_long = ft_rel.loc[[taxon]].T.join(meta[[factor1]], how="left")
+        df_long = df_long.rename(columns={taxon: "Value_raw"})
+        df_long["Value_raw"] = pd.to_numeric(df_long["Value_raw"], errors="coerce")
+        df_long["Value_trans"] = arcsine_sqrt_transform(df_long["Value_raw"])
+        df_model = df_long.dropna(subset=["Value_trans", factor1]).copy()
+
+        model = None
+        p_value = np.nan
+        model_note = "ok"
+        try:
+            if df_model[factor1].nunique() >= 2 and not np.isclose(
+                df_model["Value_trans"].var(ddof=1), 0, atol=1e-15
+            ):
+                model = ols(f"Value_trans ~ C({factor1})", data=df_model).fit()
+                anova = sm.stats.anova_lm(model, typ=2)
+                p_value = anova.loc[f"C({factor1})", "PR(>F)"]
+            else:
+                model_note = "insufficient_levels_or_zero_variance"
+        except Exception as exc:
+            model_note = f"anova_failed: {exc}"
+
+        group_counts = df_long.groupby(factor1)["Value_raw"].count()
+        avg_n = group_counts.mean() if not group_counts.empty else np.nan
+        if model is not None and pd.notna(model.mse_resid) and pd.notna(avg_n) and avg_n > 0:
+            sem_val = math.sqrt(model.mse_resid / avg_n)
+            sem_method = "model_based_transformed_scale"
+        else:
+            group_sem = df_long.groupby(factor1)["Value_raw"].sem().dropna()
+            sem_val = group_sem.mean() if not group_sem.empty else np.nan
+            sem_method = "mean_group_sem_raw_scale" if not group_sem.empty else "NA"
+
+        letters = {level: "" for level in levels}
+        if pd.notna(p_value) and p_value < ALPHA:
+            means = df_long.groupby(factor1)["Value_trans"].mean().dropna()
+            groups = [level for level in levels if level in means.index]
+            p_mat = run_posthoc(df_long, "Value_trans", factor1, alpha=ALPHA)
+            letters.update(assign_letters_by_cliques(
+                groups,
+                {group: means[group] for group in groups},
+                p_mat,
+                alpha=ALPHA,
+            ))
+
+        for index, level in enumerate(levels):
+            values = df_long.loc[df_long[factor1] == level, "Value_raw"]
+            mean_value = values.mean() if not values.empty else np.nan
+            final_rows.append({
+                first_col_name: taxon if index == 0 else "",
+                factor1: level,
+                "Mean": f"{format_mean(mean_value)}{letters.get(level, '')}" if pd.notna(mean_value) else "NA",
+                "SEM": format_sem(sem_val) if index == 0 else "",
+                f"P_{factor1}": format_p_value(p_value) if index == 0 else "",
+            })
+
+        stats_rows.append({
+            "Level": level_name,
+            "Taxon": taxon,
+            "Factor": factor1,
+            "P_Factor": p_value,
+            "SEM": sem_val,
+            "SEM_Method": sem_method,
+            "Model_OK": model is not None,
+            "Model_Note": model_note,
+            "Mean_Replicates_Per_Group": avg_n,
+        })
+
+    out_path = os.path.join(OUTPUT_DIR, f"Thesis_Table_{clean_header_text(level_name)}_WithLetters.xlsx")
+    with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
+        pd.DataFrame(final_rows).to_excel(writer, sheet_name="Table", index=False)
+        pd.DataFrame(stats_rows).to_excel(writer, sheet_name="Stats", index=False)
+    safe_print(f"[OK] Saved: {out_path}")
+
+
 # =========================================================
 # 5. 主函数
 # =========================================================
@@ -444,7 +529,10 @@ def export_top_taxa_tables():
     tax = read_taxonomy(tax_path)
 
     safe_print(f"  -> Row factor (第2列): {factor1}")
-    safe_print(f"  -> Column factor (第3列): {factor2}")
+    if factor2:
+        safe_print(f"  -> Column factor (第3列): {factor2}")
+    else:
+        safe_print("  -> Analysis mode: single factor")
 
     common_samples = [s for s in meta.index if s in ft.columns]
     if len(common_samples) == 0:
@@ -464,10 +552,11 @@ def export_top_taxa_tables():
     safe_print(f"  -> Common features: {len(common_features)}")
 
     row_levels = order_row_factor(meta[factor1].tolist())
-    col_levels = natural_sort(meta[factor2].tolist())
+    col_levels = natural_sort(meta[factor2].tolist()) if factor2 else []
 
     safe_print(f"  -> {factor1} levels: {row_levels}")
-    safe_print(f"  -> {factor2} levels: {col_levels}")
+    if factor2:
+        safe_print(f"  -> {factor2} levels: {col_levels}")
 
     for level_name, level_idx in LEVELS.items():
         safe_print(f"\n=== Processing {level_name} ===")
@@ -507,6 +596,10 @@ def export_top_taxa_tables():
             .head(TOP_N)
             .index.tolist()
         )
+
+        if factor2 is None:
+            export_one_factor_table(ft_rel, top_taxa, meta, factor1, level_name)
+            continue
 
         final_rows = []
         stats_rows = []

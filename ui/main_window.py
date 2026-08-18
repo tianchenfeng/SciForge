@@ -13,6 +13,7 @@ from ui.page_stats import PageStats
 from ui.page_gas_fit import PageGasFit
 from ui.page_silage_eval import PageSilageEval
 from ui.page_rnaseq_analysis import PageRNASeqAnalysis
+from ui.page_metabolomics import PageMetabolomics
 
 
 class MainWindow(QWidget):
@@ -38,6 +39,8 @@ class MainWindow(QWidget):
         self.btn_page_silage_eval = QPushButton("青贮综合评价")
         self.btn_page_rnaseq = QPushButton("RNASeq综合分析")
 
+        self.btn_page_metabolomics = QPushButton("代谢组")
+
         self.btn_home.clicked.connect(self.show_home)
         self.btn_page_16s.clicked.connect(self.show_16s)
         self.btn_page_feed.clicked.connect(self.show_feed)
@@ -46,6 +49,8 @@ class MainWindow(QWidget):
         self.btn_page_silage_eval.clicked.connect(self.show_silage_eval)
         self.btn_page_rnaseq.clicked.connect(self.show_rnaseq)
 
+        self.btn_page_metabolomics.clicked.connect(self.show_metabolomics)
+
         nav_layout.addWidget(self.btn_home)
         nav_layout.addWidget(self.btn_page_16s)
         nav_layout.addWidget(self.btn_page_feed)
@@ -53,6 +58,7 @@ class MainWindow(QWidget):
         nav_layout.addWidget(self.btn_page_gas_fit)
         nav_layout.addWidget(self.btn_page_silage_eval)
         nav_layout.addWidget(self.btn_page_rnaseq)
+        nav_layout.addWidget(self.btn_page_metabolomics)
         nav_layout.addStretch()
 
         self.stack = QStackedWidget()
@@ -65,12 +71,16 @@ class MainWindow(QWidget):
         self.page_silage_eval = PageSilageEval()
         self.page_rnaseq = PageRNASeqAnalysis()
 
+        self.page_metabolomics = PageMetabolomics()
+
         self.home_page.on_open_16s = self.show_16s
         self.home_page.on_open_feed = self.show_feed
         self.home_page.on_open_stats = self.show_stats
         self.home_page.on_open_gas_fit = self.show_gas_fit
         self.home_page.on_open_silage_eval = self.show_silage_eval
         self.home_page.on_open_rnaseq = self.show_rnaseq
+
+        self.home_page.on_open_metabolomics = self.show_metabolomics
 
         self.stack.addWidget(self.home_page)
         self.stack.addWidget(self.page_16s)
@@ -79,6 +89,8 @@ class MainWindow(QWidget):
         self.stack.addWidget(self.page_gas_fit)
         self.stack.addWidget(self.page_silage_eval)
         self.stack.addWidget(self.page_rnaseq)
+
+        self.stack.addWidget(self.page_metabolomics)
 
         main_layout.addLayout(nav_layout)
         main_layout.addWidget(self.stack)
@@ -108,6 +120,9 @@ class MainWindow(QWidget):
 
     def show_rnaseq(self):
         self.stack.setCurrentIndex(6)
+
+    def show_metabolomics(self):
+        self.stack.setCurrentWidget(self.page_metabolomics)
 
     def apply_style(self):
         self.setStyleSheet("""

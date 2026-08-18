@@ -185,7 +185,10 @@ def order_row_factor(values):
 
 
 def build_group_order_first_appearance(meta, factor1, factor2):
-    groups = meta[factor1].astype(str) + "_" + meta[factor2].astype(str)
+    if factor2 is None:
+        groups = meta[factor1].astype(str)
+    else:
+        groups = meta[factor1].astype(str) + "_" + meta[factor2].astype(str)
     ordered_groups = []
     seen = set()
     for g in groups:
@@ -214,21 +217,25 @@ def read_metadata_auto(meta_path):
 
     meta.columns = [clean_header_text(c) for c in meta.columns]
 
-    if meta.shape[1] < 3:
+    min_columns = 2 if ANALYSIS_MODE == "single_factor" else 3
+    if meta.shape[1] < min_columns:
+        expected = "样本名 + 一个因素" if ANALYSIS_MODE == "single_factor" else "样本名 + 两个因素"
         raise ValueError(
-            f"metadata 至少需要 3 列：样本名 + 两个因素。\n当前列名：{list(meta.columns)}"
+            f"metadata 至少需要 {min_columns} 列：{expected}。\n当前列名：{list(meta.columns)}"
         )
 
     sample_col = meta.columns[0]
     factor1 = clean_header_text(meta.columns[1])
-    factor2 = clean_header_text(meta.columns[2])
+    factor2 = None if ANALYSIS_MODE == "single_factor" else clean_header_text(meta.columns[2])
 
-    meta = meta[[sample_col, factor1, factor2]].copy()
+    factor_columns = [factor1] + ([factor2] if factor2 else [])
+    meta = meta[[sample_col] + factor_columns].copy()
     meta = meta.rename(columns={sample_col: "SampleID"})
 
     meta["SampleID"] = meta["SampleID"].astype(str).map(clean_text)
     meta[factor1] = meta[factor1].astype(str).map(clean_text)
-    meta[factor2] = meta[factor2].astype(str).map(clean_text)
+    if factor2:
+        meta[factor2] = meta[factor2].astype(str).map(clean_text)
 
     meta = meta.loc[~meta["SampleID"].duplicated(keep="first")].copy()
     meta = meta.set_index("SampleID")
@@ -301,7 +308,10 @@ def load_base_data():
 
     safe_print(f"  -> Samples aligned: {len(valid_samples)}")
     safe_print(f"  -> Row factor (第2列): {factor1}")
-    safe_print(f"  -> Col factor (第3列): {factor2}")
+    if factor2:
+        safe_print(f"  -> Col factor (第3列): {factor2}")
+    else:
+        safe_print("  -> Analysis mode: single factor")
 
     return meta, ft, nsti_df, factor1, factor2
 
@@ -335,7 +345,18 @@ def align_prediction_matrix(ft, func_pred):
     col_overlap = len(ft_asvs & pred_cols)
 
     if row_overlap == 0 and col_overlap == 0:
-        raise ValueError("功能预测表与 ASV 表没有交集，请检查 KO/EC predicted 文件格式。")
+        ft_examples = ", ".join(list(ft.index.astype(str)[:3]))
+        pred_examples = ", ".join(list(func_pred.index.astype(str)[:3]))
+        raise ValueError(
+            "功能预测表与 feature-table 的 Feature ID 没有任何交集，无法按样本加权功能丰度。\n"
+            f"feature-table Feature 数：{len(ft_asvs)}；预测表行数：{len(pred_rows)}；"
+            f"行交集：{row_overlap}；列交集：{col_overlap}。\n"
+            f"feature-table 示例：{ft_examples}\n"
+            f"预测表行示例：{pred_examples}\n"
+            "请使用由本次 feature-table/rep-seqs 生成的 KO_predicted.tsv(.gz) 和 "
+            "EC_predicted.tsv(.gz)。内置 ko_map/ec_map 只负责把功能 ID 翻译成名称，"
+            "不能替代样本与 ASV 之间的对应关系。"
+        )
 
     if row_overlap >= col_overlap:
         pred_asv_func = func_pred.copy()
@@ -440,32 +461,40 @@ def run_pca(meta, func_abd, factor1, factor2, prefix):
     coords = pca.fit_transform(abd_log.values)
     var = pca.explained_variance_ratio_
 
-    pca_df = pd.DataFrame(coords, index=abd_log.index, columns=["PC1", "PC2"]).join(meta[[factor1, factor2]])
-    pca_df["Group"] = pca_df[factor1].astype(str) + "_" + pca_df[factor2].astype(str)
+    factor_columns = [factor1] + ([factor2] if factor2 else [])
+    pca_df = pd.DataFrame(coords, index=abd_log.index, columns=["PC1", "PC2"]).join(meta[factor_columns])
+    if factor2 is None:
+        pca_df["Group"] = pca_df[factor1].astype(str)
+    else:
+        pca_df["Group"] = pca_df[factor1].astype(str) + "_" + pca_df[factor2].astype(str)
 
     coord_path = os.path.join(OUTPUT_DIR, f"{prefix}_PCA_Coordinates.tsv")
     pca_df.to_csv(coord_path, sep="\t")
 
     levels1 = order_row_factor(pca_df[factor1].unique())
-    levels2 = natural_sort(pca_df[factor2].unique())
     palette = dict(zip(levels1, (NPG_COLORS * 20)[:len(levels1)]))
-    markers = ["o", "^", "s", "D", "v", "<", ">", "P", "X", "*"]
-    marker_map = dict(zip(levels2, markers[:len(levels2)]))
 
     plt.figure(figsize=(8, 6))
-    ax = sns.scatterplot(
+    scatter_kwargs = dict(
         data=pca_df,
         x="PC1", y="PC2",
-        hue=factor1, style=factor2,
+        hue=factor1,
         hue_order=levels1,
-        style_order=levels2,
         palette=palette,
-        markers=marker_map,
         s=90,
         edgecolor="black",
         linewidth=0.5,
-        alpha=0.9
+        alpha=0.9,
     )
+    if factor2:
+        levels2 = natural_sort(pca_df[factor2].unique())
+        markers = ["o", "^", "s", "D", "v", "<", ">", "P", "X", "*"]
+        scatter_kwargs.update(
+            style=factor2,
+            style_order=levels2,
+            markers=dict(zip(levels2, markers[:len(levels2)])),
+        )
+    ax = sns.scatterplot(**scatter_kwargs)
 
     plt.axhline(0, color="gray", linestyle="--", linewidth=0.8, alpha=0.5)
     plt.axvline(0, color="gray", linestyle="--", linewidth=0.8, alpha=0.5)
@@ -518,7 +547,10 @@ def plot_heatmap_all_groups(meta, func_abd, mapping, factor1, factor2, prefix):
         return
 
     meta_sub = meta.loc[abd_filt.index].copy()
-    meta_sub["Group"] = meta_sub[factor1].astype(str) + "_" + meta_sub[factor2].astype(str)
+    if factor2 is None:
+        meta_sub["Group"] = meta_sub[factor1].astype(str)
+    else:
+        meta_sub["Group"] = meta_sub[factor1].astype(str) + "_" + meta_sub[factor2].astype(str)
 
     df_mean = abd_filt.join(meta_sub["Group"]).groupby("Group").mean()
     ordered_groups = build_group_order_first_appearance(meta_sub, factor1, factor2)
@@ -646,3 +678,4 @@ if __name__ == "__main__":
         safe_print(f"\n[ERROR] {e}")
         import traceback
         traceback.print_exc()
+        raise SystemExit(1)

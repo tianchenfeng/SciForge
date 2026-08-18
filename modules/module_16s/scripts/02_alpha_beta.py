@@ -174,21 +174,25 @@ def read_metadata_auto(meta_path):
 
     meta.columns = [clean_header_text(c) for c in meta.columns]
 
-    if meta.shape[1] < 3:
+    min_columns = 2 if ANALYSIS_MODE == "single_factor" else 3
+    if meta.shape[1] < min_columns:
+        expected = "样本名 + 一个因素" if ANALYSIS_MODE == "single_factor" else "样本名 + 两个因素"
         raise ValueError(
-            f"metadata 至少需要 3 列：样本名 + 两个因素。\n当前列名：{list(meta.columns)}"
+            f"metadata 至少需要 {min_columns} 列：{expected}。\n当前列名：{list(meta.columns)}"
         )
 
     sample_col = meta.columns[0]
     factor1 = clean_header_text(meta.columns[1])   # 行因素 / 颜色
-    factor2 = clean_header_text(meta.columns[2])   # 列因素 / 形状
+    factor2 = None if ANALYSIS_MODE == "single_factor" else clean_header_text(meta.columns[2])
 
-    meta = meta[[sample_col, factor1, factor2]].copy()
+    factor_columns = [factor1] + ([factor2] if factor2 else [])
+    meta = meta[[sample_col] + factor_columns].copy()
     meta = meta.rename(columns={sample_col: "SampleID"})
 
     meta["SampleID"] = meta["SampleID"].astype(str).map(clean_text)
     meta[factor1] = meta[factor1].astype(str).map(clean_text)
-    meta[factor2] = meta[factor2].astype(str).map(clean_text)
+    if factor2:
+        meta[factor2] = meta[factor2].astype(str).map(clean_text)
 
     meta = meta.loc[~meta["SampleID"].duplicated(keep="first")].copy()
     meta = meta.set_index("SampleID")
@@ -412,6 +416,76 @@ def calculate_alpha_metrics(counts):
         "Shannon": shannon,
         "Simpson": simpson
     }
+
+
+def build_alpha_table_one_factor(df_alpha, factor1):
+    metrics = ["Chao1", "Observed_Features", "Goods_coverage", "Shannon", "Simpson"]
+    levels = order_row_factor(df_alpha[factor1].tolist())
+    final_rows = []
+    stats_rows = []
+
+    for metric in metrics:
+        df_long = df_alpha[[metric, factor1]].rename(columns={metric: "Value"}).dropna()
+        model = None
+        p_value = np.nan
+        model_note = "ok"
+
+        try:
+            if df_long[factor1].nunique() >= 2 and not np.isclose(df_long["Value"].var(ddof=1), 0, atol=1e-15):
+                model = ols(f"Value ~ C({factor1})", data=df_long).fit()
+                anova = sm.stats.anova_lm(model, typ=2)
+                p_value = anova.loc[f"C({factor1})", "PR(>F)"]
+            else:
+                model_note = "insufficient_levels_or_zero_variance"
+        except Exception as exc:
+            model_note = f"anova_failed: {exc}"
+
+        group_counts = df_long.groupby(factor1)["Value"].count()
+        avg_n = group_counts.mean() if not group_counts.empty else np.nan
+        if model is not None and pd.notna(model.mse_resid) and pd.notna(avg_n) and avg_n > 0:
+            sem_val = math.sqrt(model.mse_resid / avg_n)
+            sem_method = "model_based"
+        else:
+            group_sem = df_long.groupby(factor1)["Value"].sem().dropna()
+            sem_val = group_sem.mean() if not group_sem.empty else np.nan
+            sem_method = "mean_group_sem" if not group_sem.empty else "NA"
+
+        letters = {level: "" for level in levels}
+        if pd.notna(p_value) and p_value < ALPHA:
+            means = df_long.groupby(factor1)["Value"].mean().dropna()
+            groups = [level for level in levels if level in means.index]
+            p_mat = run_posthoc(df_long, "Value", factor1, alpha=ALPHA)
+            letters.update(assign_letters_by_cliques(
+                groups, {group: means[group] for group in groups}, p_mat, alpha=ALPHA
+            ))
+
+        for index, level in enumerate(levels):
+            values = df_long.loc[df_long[factor1] == level, "Value"]
+            mean_value = values.mean() if not values.empty else np.nan
+            final_rows.append({
+                "Metric": metric if index == 0 else "",
+                factor1: level,
+                "Mean": f"{format_mean(mean_value)}{letters.get(level, '')}" if pd.notna(mean_value) else "NA",
+                "SEM": format_sem(sem_val) if index == 0 else "",
+                f"P_{factor1}": format_p_value(p_value) if index == 0 else "",
+            })
+
+        stats_rows.append({
+            "Metric": metric,
+            "Factor": factor1,
+            "P_Factor": p_value,
+            "SEM": sem_val,
+            "SEM_Method": sem_method,
+            "Model_OK": model is not None,
+            "Model_Note": model_note,
+            "Mean_Replicates_Per_Group": avg_n,
+        })
+
+    out_path = os.path.join(OUTPUT_DIR, "Alpha_Diversity_Table_WithLetters.xlsx")
+    with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
+        pd.DataFrame(final_rows).to_excel(writer, sheet_name="Table", index=False)
+        pd.DataFrame(stats_rows).to_excel(writer, sheet_name="Stats", index=False)
+    safe_print(f"  [OK] Saved: {out_path}")
 
 
 def build_alpha_table(df_alpha, factor1, factor2):
@@ -658,24 +732,23 @@ def export_permanova_results(dist_matrix, meta, factor1, factor2):
         "P_value": p1
     })
 
-    # 因素2
-    F2, p2, r22 = permanova_one_factor(dist_matrix, meta[factor2].values, n_perm=PERMANOVA_N_PERM, seed=43)
-    results.append({
-        "Term": factor2,
-        "Pseudo_F": F2,
-        "R2": r22,
-        "P_value": p2
-    })
+    if factor2:
+        F2, p2, r22 = permanova_one_factor(dist_matrix, meta[factor2].values, n_perm=PERMANOVA_N_PERM, seed=43)
+        results.append({
+            "Term": factor2,
+            "Pseudo_F": F2,
+            "R2": r22,
+            "P_value": p2
+        })
 
-    # 交互组合作为附加参考
-    interaction_group = meta[factor1].astype(str) + "_" + meta[factor2].astype(str)
-    Fi, pi, r2i = permanova_one_factor(dist_matrix, interaction_group.values, n_perm=PERMANOVA_N_PERM, seed=44)
-    results.append({
-        "Term": f"{factor1}×{factor2}",
-        "Pseudo_F": Fi,
-        "R2": r2i,
-        "P_value": pi
-    })
+        interaction_group = meta[factor1].astype(str) + "_" + meta[factor2].astype(str)
+        Fi, pi, r2i = permanova_one_factor(dist_matrix, interaction_group.values, n_perm=PERMANOVA_N_PERM, seed=44)
+        results.append({
+            "Term": f"{factor1}×{factor2}",
+            "Pseudo_F": Fi,
+            "R2": r2i,
+            "P_value": pi
+        })
 
     df_perm = pd.DataFrame(results)
     out_path = os.path.join(OUTPUT_DIR, "Beta_PERMANOVA.tsv")
@@ -694,15 +767,15 @@ def plot_pcoa(ft, meta, factor1, factor2):
     pc1_var = explained_variance[0] * 100 if len(explained_variance) > 0 else np.nan
     pc2_var = explained_variance[1] * 100 if len(explained_variance) > 1 else np.nan
 
-    pcoa_df = pd.DataFrame(coords, index=ft.columns, columns=["PC1", "PC2"]).join(meta[[factor1, factor2]])
-    pcoa_df["Hull_Group"] = pcoa_df[factor1].astype(str) + "_" + pcoa_df[factor2].astype(str)
+    factor_columns = [factor1] + ([factor2] if factor2 else [])
+    pcoa_df = pd.DataFrame(coords, index=ft.columns, columns=["PC1", "PC2"]).join(meta[factor_columns])
+    pcoa_df["Hull_Group"] = (
+        pcoa_df[factor1].astype(str) + "_" + pcoa_df[factor2].astype(str)
+        if factor2 else pcoa_df[factor1].astype(str)
+    )
 
     unique_factor1 = order_row_factor(pcoa_df[factor1].unique())
     diet_color_map = dict(zip(unique_factor1, (NPG_PALETTE * 20)[:len(unique_factor1)]))
-
-    unique_factor2 = natural_sort(pcoa_df[factor2].unique())
-    markers = ["o", "^", "s", "D", "v", "<", ">", "P", "X", "*"]
-    marker_map = dict(zip(unique_factor2, markers[:len(unique_factor2)]))
 
     plt.figure(figsize=(10, 8))
 
@@ -728,18 +801,16 @@ def plot_pcoa(ft, meta, factor1, factor2):
         elif len(pts) == 2:
             plt.plot(pts[:, 0], pts[:, 1], color=color, alpha=0.4, linewidth=1, linestyle="--")
 
-    sns.scatterplot(
-        data=pcoa_df,
-        x="PC1", y="PC2",
-        hue=factor1,
-        style=factor2,
-        palette=diet_color_map,
-        markers=marker_map,
-        s=PCOA_POINT_SIZE,
-        edgecolor="black",
-        linewidth=0.5,
-        alpha=0.9
+    scatter_kwargs = dict(
+        data=pcoa_df, x="PC1", y="PC2", hue=factor1,
+        palette=diet_color_map, s=PCOA_POINT_SIZE,
+        edgecolor="black", linewidth=0.5, alpha=0.9
     )
+    if factor2:
+        unique_factor2 = natural_sort(pcoa_df[factor2].unique())
+        markers = ["o", "^", "s", "D", "v", "<", ">", "P", "X", "*"]
+        scatter_kwargs.update(style=factor2, markers=dict(zip(unique_factor2, markers[:len(unique_factor2)])))
+    sns.scatterplot(**scatter_kwargs)
 
     plt.title("PCoA Analysis (Bray-Curtis)", fontname=FONT, fontsize=14)
     plt.xlabel(f"PCo1 [{pc1_var:.1f}%]", fontname=FONT, fontsize=12)
@@ -806,15 +877,15 @@ def plot_pcoa_ellipse(ft, meta, factor1, factor2):
     pc1_var = explained_variance[0] * 100 if len(explained_variance) > 0 else np.nan
     pc2_var = explained_variance[1] * 100 if len(explained_variance) > 1 else np.nan
 
-    pcoa_df = pd.DataFrame(coords, index=ft.columns, columns=["PC1", "PC2"]).join(meta[[factor1, factor2]])
-    pcoa_df["Group"] = pcoa_df[factor1].astype(str) + "_" + pcoa_df[factor2].astype(str)
+    factor_columns = [factor1] + ([factor2] if factor2 else [])
+    pcoa_df = pd.DataFrame(coords, index=ft.columns, columns=["PC1", "PC2"]).join(meta[factor_columns])
+    pcoa_df["Group"] = (
+        pcoa_df[factor1].astype(str) + "_" + pcoa_df[factor2].astype(str)
+        if factor2 else pcoa_df[factor1].astype(str)
+    )
 
     unique_factor1 = order_row_factor(pcoa_df[factor1].unique())
     color_map = dict(zip(unique_factor1, (NPG_PALETTE * 20)[:len(unique_factor1)]))
-
-    unique_factor2 = natural_sort(pcoa_df[factor2].unique())
-    markers = ["o", "^", "s", "D", "v", "<", ">", "P", "X", "*"]
-    marker_map = dict(zip(unique_factor2, markers[:len(unique_factor2)]))
 
     fig, ax = plt.subplots(figsize=(10, 8))
 
@@ -837,19 +908,16 @@ def plot_pcoa_ellipse(ft, meta, factor1, factor2):
         )
 
     # 再画散点
-    sns.scatterplot(
-        data=pcoa_df,
-        x="PC1", y="PC2",
-        hue=factor1,
-        style=factor2,
-        palette=color_map,
-        markers=marker_map,
-        s=PCOA_POINT_SIZE,
-        edgecolor="black",
-        linewidth=0.5,
-        alpha=0.95,
-        ax=ax
+    scatter_kwargs = dict(
+        data=pcoa_df, x="PC1", y="PC2", hue=factor1,
+        palette=color_map, s=PCOA_POINT_SIZE,
+        edgecolor="black", linewidth=0.5, alpha=0.95, ax=ax
     )
+    if factor2:
+        unique_factor2 = natural_sort(pcoa_df[factor2].unique())
+        markers = ["o", "^", "s", "D", "v", "<", ">", "P", "X", "*"]
+        scatter_kwargs.update(style=factor2, markers=dict(zip(unique_factor2, markers[:len(unique_factor2)])))
+    sns.scatterplot(**scatter_kwargs)
 
     ax.set_title("PCoA Analysis (Bray-Curtis)", fontname=FONT, fontsize=14)
     ax.set_xlabel(f"PCo1 [{pc1_var:.1f}%]", fontname=FONT, fontsize=12)
@@ -1515,7 +1583,10 @@ def run_alpha_beta():
 
     safe_print(f"  -> Samples: {len(common_samples)}")
     safe_print(f"  -> Row factor (第2列): {factor1}")
-    safe_print(f"  -> Column factor (第3列): {factor2}")
+    if factor2:
+        safe_print(f"  -> Column factor (第3列): {factor2}")
+    else:
+        safe_print("  -> Analysis mode: single factor")
 
     # 1. 计算 alpha 指标
     safe_print("  -> Calculating alpha diversity metrics ...")
@@ -1526,30 +1597,32 @@ def run_alpha_beta():
         row.update(metrics)
         alpha_data.append(row)
 
-    df_alpha = pd.DataFrame(alpha_data).set_index("SampleID").join(meta[[factor1, factor2]])
+    factor_columns = [factor1] + ([factor2] if factor2 else [])
+    df_alpha = pd.DataFrame(alpha_data).set_index("SampleID").join(meta[factor_columns])
     alpha_raw_path = os.path.join(OUTPUT_DIR, "Alpha_Diversity_Raw.tsv")
     df_alpha.to_csv(alpha_raw_path, sep="\t")
     safe_print(f"  [OK] Saved: {alpha_raw_path}")
 
     # 2. alpha 统计表
-    build_alpha_table(df_alpha, factor1, factor2)
+    if factor2:
+        build_alpha_table(df_alpha, factor1, factor2)
+    else:
+        build_alpha_table_one_factor(df_alpha, factor1)
 
     # 3. beta / PCoA
     plot_pcoa(ft, meta, factor1, factor2)  # 总图：棱角 hull
     plot_pcoa_ellipse(ft, meta, factor1, factor2)  # 总图：椭圆 ellipse
 
-    plot_pcoa_single_factor1_level_hull(ft, meta, factor1, factor2)  # 固定因素1：棱角
-    plot_pcoa_single_factor1_level_ellipse(ft, meta, factor1, factor2)  # 固定因素1：椭圆
+    if factor2:
+        plot_pcoa_single_factor1_level_hull(ft, meta, factor1, factor2)
+        plot_pcoa_single_factor1_level_ellipse(ft, meta, factor1, factor2)
+        plot_pcoa_single_factor2_level_hull(ft, meta, factor1, factor2)
+        plot_pcoa_single_factor2_level_ellipse(ft, meta, factor1, factor2)
 
-    plot_pcoa_single_factor2_level_hull(ft, meta, factor1, factor2)  # 固定因素2：棱角
-    plot_pcoa_single_factor2_level_ellipse(ft, meta, factor1, factor2)  # 固定因素2：椭圆
-
-    # 3.1 新增：子集单独重算版分图
-    plot_pcoa_single_factor1_level_hull_recalc(ft, meta, factor1, factor2)
-    plot_pcoa_single_factor1_level_ellipse_recalc(ft, meta, factor1, factor2)
-
-    plot_pcoa_single_factor2_level_hull_recalc(ft, meta, factor1, factor2)
-    plot_pcoa_single_factor2_level_ellipse_recalc(ft, meta, factor1, factor2)
+        plot_pcoa_single_factor1_level_hull_recalc(ft, meta, factor1, factor2)
+        plot_pcoa_single_factor1_level_ellipse_recalc(ft, meta, factor1, factor2)
+        plot_pcoa_single_factor2_level_hull_recalc(ft, meta, factor1, factor2)
+        plot_pcoa_single_factor2_level_ellipse_recalc(ft, meta, factor1, factor2)
 
     # 4. PERMANOVA
     dist_matrix, _ = compute_bray_curtis(ft)
