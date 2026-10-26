@@ -174,6 +174,8 @@ def main():
     print("===== 创建输出目录 =====")
     for name in ["output", "logs"]:
         (RELEASE_DIR / name).mkdir(exist_ok=True)
+    if (PROJECT_ROOT / "docs").exists():
+        shutil.copytree(PROJECT_ROOT / "docs", RELEASE_DIR / "docs", dirs_exist_ok=True)
 
     files = [str(path.relative_to(RELEASE_DIR)) for path in RELEASE_DIR.rglob("*") if path.is_file()]
     (RELEASE_DIR / "package_manifest.json").write_text(json.dumps({"version":VERSION,"files":files},ensure_ascii=False,indent=2),encoding="utf-8")
