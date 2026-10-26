@@ -37,6 +37,13 @@ def validate_dataset(dataset: MetabolomicsDataset) -> pd.DataFrame:
     rows.append(_row("Replicates per group", "WARNING" if any(v < 3 for v in group_counts.values()) else "PASS", str(group_counts), "At least three replicates per group are recommended."))
 
     numeric = abundance.apply(pd.to_numeric, errors="coerce")
+    magnitudes = np.abs(numeric.to_numpy(dtype=float))
+    infinite_count = int(np.isinf(magnitudes).sum())
+    unsafe_count = int(((magnitudes > 1e150) | ((magnitudes > 0) & (magnitudes < 1e-150))).sum())
+    rows.append(_row("Finite abundance", "ERROR" if infinite_count else "PASS", infinite_count,
+                     "Infinity is not a valid abundance; check the source data."))
+    rows.append(_row("Numeric range", "ERROR" if unsafe_count else "PASS", unsafe_count,
+                     "Nonzero abundance must be between 1e-150 and 1e150; convert units before analysis."))
     total = max(numeric.size, 1)
     missing_rate = float(numeric.isna().to_numpy().sum() / total)
     negative_rate = float((numeric < 0).to_numpy().sum() / total)

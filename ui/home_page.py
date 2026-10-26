@@ -1,130 +1,110 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt, QSize
+from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 
 class HomePage(QWidget):
+    MODULES = [
+        ("stats", "统计分析", "ANOVA · 多重比较 · 批量报告", "Aa", "#007aff", "#eaf3ff"),
+        ("16s", "16S 微生物组", "多样性 · 物种组成 · 功能预测", "16", "#20a38b", "#e6f7f1"),
+        ("metabolomics", "代谢组分析", "质量控制 · 多变量 · 差异分析", "M", "#9461d4", "#f1eafa"),
+        ("rnaseq", "RNA-Seq 分析", "差异基因 · 富集分析 · 候选筛选", "R", "#4977c1", "#eaf0fb"),
+        ("gas_fit", "体外产气拟合", "动力学模型 · 参数估计 · 曲线拟合", "↗", "#db8b35", "#fff3e6"),
+        ("silage_eval", "青贮综合评价", "隶属函数 · 熵权赋权 · 综合排序", "S", "#509e65", "#eaf5eb"),
+        ("feed", "智能饲料配方", "营养约束 · 原料配比 · 成本优化", "F", "#cc7184", "#fceef2"),
+    ]
+
     def __init__(self):
         super().__init__()
-        self.on_open_16s = None
-        self.on_open_feed = None
-        self.on_open_stats = None
-        self.on_open_gas_fit = None
-        self.on_open_silage_eval = None
-        self.on_open_rnaseq = None
-        self.on_open_metabolomics = None
-        self.init_ui()
-        self.apply_style()
+        self._columns = 0
+        for key, *_ in self.MODULES:
+            setattr(self, f"on_open_{key}", None)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(4, 8, 4, 8)
+        root.setSpacing(22)
+        hero = QFrame()
+        hero.setObjectName("hero")
+        hero_layout = QVBoxLayout(hero)
+        hero_layout.setContentsMargins(30, 28, 30, 30)
+        hero_layout.setSpacing(12)
+        for text, name in [
+            ("SCIFORGE  /  RESEARCH WORKSPACE", "eyebrow"),
+            ("让数据，成为发现。", "heroTitle"),
+            ("从实验数据到清晰结论，让专注回到科研本身。", "heroSubtitle"),
+        ]:
+            label = QLabel(text)
+            label.setObjectName(name)
+            label.setWordWrap(True)
+            hero_layout.addWidget(label)
+        root.addWidget(hero)
+        heading = QHBoxLayout()
+        title = QLabel("开始你的探索")
+        title.setObjectName("sectionTitle")
+        heading.addWidget(title)
+        heading.addStretch()
+        hint = QLabel("7 个分析模块 · 一个工作空间")
+        hint.setObjectName("mutedLabel")
+        heading.addWidget(hint)
+        root.addLayout(heading)
+        self.grid = QGridLayout()
+        self.grid.setSpacing(14)
+        self.cards = []
+        for key, title, description, symbol, color, background in self.MODULES:
+            card = QPushButton()
+            card.setObjectName("moduleCard")
+            card.setAccessibleName(title)
+            card.setMinimumSize(240, 142)
+            card.setCursor(Qt.PointingHandCursor)
+            card.clicked.connect(lambda checked=False, k=key: self._open(k))
+            layout = QVBoxLayout(card)
+            layout.setContentsMargins(20, 18, 20, 18)
+            layout.setSpacing(8)
+            top = QHBoxLayout()
+            badge = QLabel(symbol)
+            badge.setFixedSize(32, 32)
+            badge.setAlignment(Qt.AlignCenter)
+            badge.setStyleSheet(f"color: {color}; background: {background}; border-radius: 9px; font-weight: 600; font-size: 16px;")
+            top.addWidget(badge)
+            top.addStretch()
+            arrow = QLabel("↗")
+            arrow.setObjectName("cardArrow")
+            top.addWidget(arrow)
+            layout.addLayout(top)
+            for text, name in [(title, "cardTitle"), (description, "cardDescription")]:
+                label = QLabel(text)
+                label.setWordWrap(True)
+                label.setObjectName(name)
+                layout.addWidget(label)
+            for child in card.findChildren(QWidget):
+                child.setAttribute(Qt.WA_TransparentForMouseEvents)
+            setattr(self, f"btn_{key}", card)
+            self.cards.append(card)
+        root.addLayout(self.grid)
+        note = QLabel("本地处理数据  ·  结果可追溯  ·  报告随时导出")
+        note.setObjectName("mutedLabel")
+        note.setWordWrap(True)
+        root.addWidget(note)
+        root.addStretch()
+        self._reflow(3)
 
-    def init_ui(self):
-        layout = QVBoxLayout()
-        layout.setContentsMargins(40, 40, 40, 40)
-        layout.setSpacing(24)
+    def _open(self, key):
+        callback = getattr(self, f"on_open_{key}", None)
+        if callable(callback):
+            callback()
 
-        title = QLabel("田晨丰工具箱")
-        title.setAlignment(Qt.AlignCenter)
-        title.setFont(QFont("Microsoft YaHei", 20, QFont.Bold))
+    def _reflow(self, columns):
+        if columns == self._columns:
+            return
+        self._columns = columns
+        for card in self.cards:
+            self.grid.removeWidget(card)
+        for index, card in enumerate(self.cards):
+            self.grid.addWidget(card, index // columns, index % columns)
+        for column in range(3):
+            self.grid.setColumnStretch(column, 1 if column < columns else 0)
 
-        subtitle = QLabel("请选择要使用的功能模块")
-        subtitle.setAlignment(Qt.AlignCenter)
-        subtitle.setObjectName("subtitleLabel")
+    def resizeEvent(self, event):
+        self._reflow(max(1, min(3, (event.size().width() + 14) // 270)))
+        super().resizeEvent(event)
 
-        layout.addWidget(title)
-        layout.addWidget(subtitle)
-
-        btn_layout = QVBoxLayout()
-        btn_layout.setSpacing(18)
-
-        self.btn_16s = QPushButton("16S 生信分析")
-        self.btn_feed = QPushButton("智能饲料配方")
-        self.btn_stats = QPushButton("通用统计分析")
-        self.btn_gas_fit = QPushButton("体外产气拟合")
-        self.btn_silage_eval = QPushButton("青贮综合评价")
-        self.btn_rnaseq = QPushButton("RNASeq 综合分析")
-
-        self.btn_metabolomics = QPushButton("代谢组综合分析")
-
-        self.btn_16s.clicked.connect(self.handle_open_16s)
-        self.btn_feed.clicked.connect(self.handle_open_feed)
-        self.btn_stats.clicked.connect(self.handle_open_stats)
-        self.btn_gas_fit.clicked.connect(self.handle_open_gas_fit)
-        self.btn_silage_eval.clicked.connect(self.handle_open_silage_eval)
-        self.btn_rnaseq.clicked.connect(self.handle_open_rnaseq)
-
-        self.btn_metabolomics.clicked.connect(self.handle_open_metabolomics)
-
-        btn_layout.addWidget(self.btn_16s)
-        btn_layout.addWidget(self.btn_feed)
-        btn_layout.addWidget(self.btn_stats)
-        btn_layout.addWidget(self.btn_gas_fit)
-        btn_layout.addWidget(self.btn_silage_eval)
-        btn_layout.addWidget(self.btn_rnaseq)
-
-        btn_layout.addWidget(self.btn_metabolomics)
-
-        layout.addStretch()
-        layout.addLayout(btn_layout)
-        layout.addStretch()
-
-        self.setLayout(layout)
-
-    def handle_open_16s(self):
-        if callable(self.on_open_16s):
-            self.on_open_16s()
-
-    def handle_open_feed(self):
-        if callable(self.on_open_feed):
-            self.on_open_feed()
-
-    def handle_open_stats(self):
-        if callable(self.on_open_stats):
-            self.on_open_stats()
-
-    def handle_open_gas_fit(self):
-        if callable(self.on_open_gas_fit):
-            self.on_open_gas_fit()
-
-    def handle_open_silage_eval(self):
-        if callable(self.on_open_silage_eval):
-            self.on_open_silage_eval()
-
-    def handle_open_rnaseq(self):
-        if callable(self.on_open_rnaseq):
-            self.on_open_rnaseq()
-
-    def handle_open_metabolomics(self):
-        if callable(self.on_open_metabolomics):
-            self.on_open_metabolomics()
-
-    def apply_style(self):
-        self.setStyleSheet("""
-            QWidget {
-                background-color: #f7f9fc;
-                font-family: Microsoft YaHei, Arial;
-                font-size: 11pt;
-            }
-
-            QLabel#subtitleLabel {
-                color: #6b7280;
-                font-size: 12pt;
-            }
-
-            QPushButton {
-                background-color: #4f46e5;
-                color: white;
-                border: none;
-                border-radius: 12px;
-                padding: 18px 20px;
-                font-size: 14pt;
-                font-weight: bold;
-                min-height: 56px;
-            }
-
-            QPushButton:hover {
-                background-color: #4338ca;
-            }
-
-            QPushButton:pressed {
-                background-color: #3730a3;
-            }
-        """)
+    def minimumSizeHint(self):
+        return QSize(260, self.layout().minimumSize().height())

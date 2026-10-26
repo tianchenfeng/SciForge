@@ -41,3 +41,8 @@ project_snapshot.md
 build/
 dist/
 release/
+
+# Local research data and disposable acceptance runs
+/test/
+/01_input/
+/02_output/

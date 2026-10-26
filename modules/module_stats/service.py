@@ -2,6 +2,7 @@ from pathlib import Path
 import re
 import sys
 
+import numpy as np
 import pandas as pd
 
 
@@ -46,7 +47,26 @@ def _clean_column_names(df: pd.DataFrame) -> pd.DataFrame:
         str(c).replace("\ufeff", "").strip()
         for c in df.columns
     ]
+    if df.columns.duplicated().any():
+        raise ValueError("Column names must be unique after trimming spaces / 列名去除空格后不能重复。")
     return df
+
+
+def _validate_analysis_input(df, factors, metrics):
+    """Reject unsafe inputs before invoking the unchanged statistical routines."""
+    for factor in factors:
+        labels = df[factor]
+        if labels.isna().any() or labels.astype(str).str.strip().eq("").any():
+            raise ValueError(f"Factor '{factor}' has missing/blank labels / 因素列存在空白分组，请补全。")
+        if labels.nunique() < 2:
+            raise ValueError(f"Factor '{factor}' requires at least two levels / 因素至少需要两个水平。")
+    for metric in metrics:
+        values = pd.to_numeric(df[metric], errors="coerce").dropna().to_numpy(dtype=float)
+        if not np.isfinite(values).all():
+            raise ValueError(f"Metric '{metric}' contains infinity / 指标含无穷大，请检查原始数据。")
+        magnitudes = np.abs(values[values != 0])
+        if ((magnitudes > 1e150) | (magnitudes < 1e-150)).any():
+            raise ValueError(f"Metric '{metric}' exceeds the supported numeric range (1e-150 to 1e150) / 数值超出安全范围，请换算单位后重试。")
 
 
 def _format_p_value(p):
@@ -280,6 +300,7 @@ def get_table_columns(input_file) -> list[str]:
 def run_stats_analysis(input_file, output_dir, factor1, factor2, value_col):
     try:
         input_file, df = _prepare_input(input_file, [factor1, factor2, value_col])
+        _validate_analysis_input(df, [factor1, factor2], [value_col])
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -350,6 +371,8 @@ def run_one_way_batch_analysis(input_file, output_dir, factor=None):
         if not metrics:
             raise ValueError("No metric columns found with at least two numeric values.")
 
+        _validate_analysis_input(df, [factor], metrics)
+
         results = {}
         for metric in metrics:
             results[metric] = run_one_way_anova(
@@ -415,6 +438,8 @@ def run_two_way_batch_analysis(input_file, output_dir, factor1=None, factor2=Non
         metrics = _detect_metric_columns(df, start_index=2)
         if not metrics:
             raise ValueError("No metric columns found with at least two numeric values.")
+
+        _validate_analysis_input(df, [factor1, factor2], metrics)
 
         results = {}
         for metric in metrics:

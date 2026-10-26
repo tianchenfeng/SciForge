@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import List, Dict, Any
+import math
 
 
 class FeedFormulaValidator:
@@ -59,6 +60,8 @@ class FeedFormulaValidator:
                 except (TypeError, ValueError):
                     raise ValueError(f"{name} 的 {field} 不是合法数字。")
 
+                if not math.isfinite(val):
+                    raise ValueError(f"{name} 的 {field} 必须为有限数字，不能是 NaN 或无穷大。")
                 if val < 0:
                     raise ValueError(f"{name} 的 {field} 不能为负数。")
 
@@ -91,6 +94,8 @@ class FeedFormulaValidator:
                 except (TypeError, ValueError):
                     raise ValueError(f"{key} 的 target 或 error 不是合法数字。")
 
+                if not math.isfinite(target_val) or not math.isfinite(error_val):
+                    raise ValueError(f"{key} 的 target 和 error 必须为有限数字。")
                 if target_val < 0:
                     raise ValueError(f"{key} 的 target 不能为负数。")
 

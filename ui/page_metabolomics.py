@@ -6,12 +6,12 @@ from pathlib import Path
 import sys
 import tempfile
 
-from PySide6.QtCore import QProcess, QUrl
+from PySide6.QtCore import QProcess, QUrl, Qt
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox,
     QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton,
-    QSpinBox, QSplitter, QTabWidget, QTableWidget, QTableWidgetItem, QTextBrowser,
+    QScrollArea, QSpinBox, QSplitter, QTabWidget, QTableWidget, QTableWidgetItem, QTextBrowser,
     QVBoxLayout, QWidget,
 )
 
@@ -39,6 +39,8 @@ class PageMetabolomics(QWidget):
         root.addWidget(title)
 
         splitter = QSplitter()
+        self.splitter = splitter
+        splitter.setChildrenCollapsible(False)
         controls = QWidget(); controls_layout = QVBoxLayout(controls)
 
         io_box = QGroupBox("1. 数据与输出")
@@ -113,10 +115,22 @@ class PageMetabolomics(QWidget):
             self.results_tabs.addTab(browser, area)
         right.addTab(self.results_tabs, "结果浏览")
         self.open_result_button = QPushButton("打开结果目录"); self.open_result_button.setEnabled(False); self.open_result_button.clicked.connect(self.open_result)
-        right.setCornerWidget(self.open_result_button)
+        metadata_layout.addWidget(self.open_result_button)
 
-        splitter.addWidget(controls); splitter.addWidget(right); splitter.setSizes([430, 780])
+        controls_scroll = QScrollArea()
+        controls_scroll.setObjectName("controlsScroll")
+        controls_scroll.setWidgetResizable(True)
+        controls_scroll.setWidget(controls)
+        controls_scroll.setMinimumSize(420, 360)
+        right.setMinimumSize(340, 320)
+        splitter.addWidget(controls_scroll); splitter.addWidget(right); splitter.setSizes([470, 650])
         root.addWidget(splitter)
+
+    def resizeEvent(self, event):
+        orientation = Qt.Horizontal if event.size().width() >= 1050 else Qt.Vertical
+        if self.splitter.orientation() != orientation:
+            self.splitter.setOrientation(orientation)
+        super().resizeEvent(event)
 
     def _choose_input_dir(self):
         value = QFileDialog.getExistingDirectory(self, "选择 workflow_results 目录")

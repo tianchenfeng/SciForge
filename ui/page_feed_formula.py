@@ -66,6 +66,9 @@ class PageFeedFormula(QWidget):
         self.table = QTableWidget(0, len(self.COLUMN_LABELS))
         self.table.setHorizontalHeaderLabels(self.COLUMN_LABELS)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table.horizontalHeader().setMinimumSectionSize(82)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Fixed)
+        self.table.setColumnWidth(1, 150)
         self.table.verticalHeader().setVisible(True)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
 
@@ -76,6 +79,9 @@ class PageFeedFormula(QWidget):
         # 约束区
         constraint_group = QGroupBox("2. 约束条件设置（Target ± Error）")
         constraint_layout = QGridLayout()
+        self.constraint_layout = constraint_layout
+        self.constraint_boxes = []
+        self.constraint_columns = 2
         constraint_layout.setHorizontalSpacing(18)
         constraint_layout.setVerticalSpacing(10)
 
@@ -94,6 +100,7 @@ class PageFeedFormula(QWidget):
                 key, label_text, default_enable, default_target, default_error, target_step, error_step
             )
             constraint_layout.addWidget(box, idx // 2, idx % 2)
+            self.constraint_boxes.append(box)
 
         constraint_group.setLayout(constraint_layout)
 
@@ -144,7 +151,7 @@ class PageFeedFormula(QWidget):
         enable_cb.setChecked(default_enable)
 
         target_label = QLabel("目标值")
-        target_label.setMinimumWidth(70)
+        target_label.setMinimumWidth(52)
         target_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
 
         target_spin = QDoubleSpinBox()
@@ -154,14 +161,15 @@ class PageFeedFormula(QWidget):
         target_spin.setValue(default_target)
         target_spin.setKeyboardTracking(False)
         target_spin.setMinimumHeight(32)
-        target_spin.setMinimumWidth(160)
+        target_spin.setMinimumWidth(105)
         target_spin.setAlignment(Qt.AlignLeft)
         target_spin.setButtonSymbols(QAbstractSpinBox.NoButtons)
 
         from PySide6.QtGui import QFont
 
         def _style_pm_button(btn: QPushButton):
-            btn.setFixedSize(44, 44)  # 更大按钮
+            btn.setFixedSize(32, 32)
+            btn.setProperty("compact", True)
             btn.setFont(QFont("Microsoft YaHei", 16, QFont.Bold))  # 放大符号
             btn.setStyleSheet("""
                 QPushButton {
@@ -199,7 +207,7 @@ class PageFeedFormula(QWidget):
         target_row.addWidget(target_plus)
 
         error_label = QLabel("误差")
-        error_label.setMinimumWidth(70)
+        error_label.setMinimumWidth(52)
         error_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
 
         error_spin = QDoubleSpinBox()
@@ -209,39 +217,9 @@ class PageFeedFormula(QWidget):
         error_spin.setValue(default_error)
         error_spin.setKeyboardTracking(False)
         error_spin.setMinimumHeight(32)
-        error_spin.setMinimumWidth(160)
+        error_spin.setMinimumWidth(105)
         error_spin.setAlignment(Qt.AlignLeft)
         error_spin.setButtonSymbols(QAbstractSpinBox.NoButtons)
-
-        from PySide6.QtGui import QFont
-
-        def _style_pm_button(btn: QPushButton):
-            btn.setFixedSize(44, 44)  # 更大按钮
-            btn.setFont(QFont("Microsoft YaHei", 16, QFont.Bold))  # 放大符号
-            btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #4f46e5;
-                    color: white;
-                    border: none;
-                    border-radius: 10px;
-                }
-                QPushButton:hover {
-                    background-color: #4338ca;
-                }
-                QPushButton:pressed {
-                    background-color: #3730a3;
-                }
-            """)
-
-        target_minus = QPushButton("−")  # 注意：用真正的减号（更居中）
-        target_plus = QPushButton("+")
-        _style_pm_button(target_minus)
-        _style_pm_button(target_plus)
-
-        error_minus = QPushButton("−")
-        error_plus = QPushButton("+")
-        _style_pm_button(error_minus)
-        _style_pm_button(error_plus)
 
         error_minus.clicked.connect(error_spin.stepDown)
         error_plus.clicked.connect(error_spin.stepUp)
@@ -291,6 +269,16 @@ class PageFeedFormula(QWidget):
         )
 
         return box
+
+    def resizeEvent(self, event):
+        columns = 2 if event.size().width() >= 850 else 1
+        if columns != self.constraint_columns:
+            self.constraint_columns = columns
+            for box in self.constraint_boxes:
+                self.constraint_layout.removeWidget(box)
+            for index, box in enumerate(self.constraint_boxes):
+                self.constraint_layout.addWidget(box, index // columns, index % columns)
+        super().resizeEvent(event)
 
     def _toggle_constraint_inputs(
             self,

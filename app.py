@@ -3,9 +3,6 @@ import sys
 import runpy
 import argparse
 
-from PySide6.QtWidgets import QApplication
-from ui.main_window import MainWindow
-
 
 def get_base_dir() -> str:
     """
@@ -68,16 +65,45 @@ def run_metabolomics() -> int | None:
 
 
 def main() -> int:
+    if getattr(sys, "frozen", False) and any(flag in sys.argv for flag in ("--run-script", "--run-metabolomics", "--self-test")):
+        _restore_child_streams()
+    if "--self-test" in sys.argv:
+        from common.runtime_check import main as runtime_check
+        return runtime_check(sys.argv[1:])
     metabolomics_exit = run_metabolomics()
     if metabolomics_exit is not None:
         return metabolomics_exit
     if run_embedded_script():
         return 0
 
+    from PySide6.QtWidgets import QApplication
+    from ui.main_window import MainWindow
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
     return app.exec()
+
+
+def _restore_child_streams():
+    """Windowed PyInstaller children still need their inherited QProcess pipes."""
+    if os.name != "nt":
+        return
+    import ctypes
+    from ctypes import wintypes
+    import msvcrt
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.GetStdHandle.argtypes = [wintypes.DWORD]
+    kernel.GetStdHandle.restype = wintypes.HANDLE
+    for name, handle_id in [("stdout", -11), ("stderr", -12)]:
+        if getattr(sys, name) is not None:
+            continue
+        handle = kernel.GetStdHandle(handle_id & 0xffffffff)
+        if handle and handle != wintypes.HANDLE(-1).value:
+            try:
+                fd = msvcrt.open_osfhandle(handle, os.O_WRONLY | os.O_BINARY)
+                setattr(sys, name, os.fdopen(fd, "w", encoding="utf-8", buffering=1))
+            except OSError:
+                pass
 
 
 if __name__ == "__main__":

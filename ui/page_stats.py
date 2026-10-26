@@ -273,7 +273,7 @@ class PageStats(QWidget):
             return
 
         message = result.get("message", "")
-        if message:
+        if message and result.get("success"):
             if result.get("analysis_type") == "one_way":
                 self.log("单因素批量统计分析完成。")
             elif result.get("analysis_type") == "two_way":

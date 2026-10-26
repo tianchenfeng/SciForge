@@ -34,7 +34,7 @@ from modules.module_metabolomics.validation import has_blocking_errors, validate
 from modules.module_metabolomics.vendor import load_vendor_oplsda
 
 
-SCIFORGE_VERSION = "4.0-metabolomics"
+SCIFORGE_VERSION = "4.1-desktop"
 
 
 @dataclass
